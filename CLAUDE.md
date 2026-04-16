@@ -29,6 +29,14 @@ This is an npm workspace monorepo:
 | [docs/DESIGN.md](docs/DESIGN.md) | How to design features before implementation |
 | [SECURITY.md](SECURITY.md) | Relay threat model, E2E encryption, DNS rebinding, agent auth |
 
+## Change tracking docs
+
+- Keep design and implementation planning in `docs/plans/`.
+- Add a factual record in `docs/changes/YYYY-MM-DD-<topic>.md` for incident analysis, deployed behavior changes, compatibility-sensitive fixes, or host-specific debugging that should remain auditable.
+- Follow `docs/changes/README.md` for the required section order and naming rules.
+- Record only verified facts. Include exact versions, commit hashes, branch names, commands, paths, host names, and user-visible messages when known.
+- If something was not verified, say that clearly instead of inferring it.
+
 ## Quick start
 
 ```bash
