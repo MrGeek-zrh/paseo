@@ -144,7 +144,7 @@ export const usePanelStore = create<PanelState>()(
       },
 
       // File explorer defaults
-      explorerTab: "changes",
+      explorerTab: "files",
       explorerTabByCheckout: {},
       expandedPathsByWorkspace: {},
       diffExpandedPathsByWorkspace: {},
@@ -342,7 +342,7 @@ export const usePanelStore = create<PanelState>()(
         }
 
         if (!isExplorerTab(state.explorerTab)) {
-          state.explorerTab = "changes";
+          state.explorerTab = "files";
         }
 
         if (

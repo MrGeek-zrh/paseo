@@ -591,6 +591,54 @@ describe("WorkspaceGitServiceImpl", () => {
     service.dispose();
   });
 
+  test("requestWorkingTreeWatch stops Linux traversal when watcher capacity is exhausted", async () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, "platform", {
+      configurable: true,
+      value: "linux",
+    });
+
+    const capacityError = new Error(
+      "ENOSPC: System limit for number of file watchers reached",
+    ) as Error & { code?: string };
+    capacityError.code = "ENOSPC";
+
+    let watchAttemptCount = 0;
+    const watch = vi.fn(() => {
+      watchAttemptCount += 1;
+      if (watchAttemptCount === 2) {
+        throw capacityError;
+      }
+      return createWatcher() as any;
+    });
+    const readdir = vi.fn(async (directory: string) => {
+      if (directory === "/tmp/repo") {
+        return [
+          createDirent("packages", true),
+          createDirent("apps", true),
+          createDirent(".git", true),
+        ];
+      }
+      if (directory === path.join("/tmp/repo", "packages")) {
+        return [createDirent("server", true)];
+      }
+      return [];
+    });
+
+    const service = createService({ watch, readdir });
+
+    await expect(service.requestWorkingTreeWatch("/tmp/repo", vi.fn())).rejects.toThrow(
+      "watchers reached",
+    );
+    expect(watch).toHaveBeenCalledTimes(2);
+
+    service.dispose();
+    Object.defineProperty(process, "platform", {
+      configurable: true,
+      value: originalPlatform,
+    });
+  });
+
   test("sets a 5-second fallback polling interval when recursive watch is unavailable", async () => {
     if (process.platform === "linux") {
       // On Linux, recursive watch is never attempted — the service uses per-directory

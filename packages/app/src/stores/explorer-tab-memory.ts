@@ -28,7 +28,7 @@ export function resolveExplorerTabForCheckout(params: {
 }): ExplorerTab {
   const key = buildExplorerCheckoutKey(params.serverId, params.cwd);
   const stored = key ? params.explorerTabByCheckout[key] : null;
-  const defaultTab: ExplorerTab = params.isGit ? "changes" : "files";
+  const defaultTab: ExplorerTab = "files";
   const nextTab = stored && isExplorerTab(stored) ? stored : defaultTab;
   return coerceExplorerTabForCheckout(nextTab, params.isGit);
 }
