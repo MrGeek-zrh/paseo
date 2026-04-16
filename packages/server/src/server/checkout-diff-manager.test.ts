@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 const { getCheckoutDiffMock, toCheckoutErrorMock } = vi.hoisted(() => ({
   getCheckoutDiffMock: vi.fn(async () => ({ diff: "", structured: [] })),
   toCheckoutErrorMock: vi.fn((error: unknown) => ({
+    code: "UNKNOWN",
     message: error instanceof Error ? error.message : String(error),
   })),
 }));
@@ -180,5 +181,33 @@ describe("CheckoutDiffManager", () => {
       expect.objectContaining({ mode: "uncommitted", includeStructured: true }),
       { paseoHome: "/tmp/paseo-test" },
     );
+  });
+
+  test("subscribe returns a structured error when watcher capacity is exhausted", async () => {
+    const { manager, mockRequestWorkingTreeWatch } = createManager();
+    const capacityError = new Error(
+      "ENOSPC: System limit for number of file watchers reached",
+    ) as Error & { code?: string };
+    capacityError.code = "ENOSPC";
+    mockRequestWorkingTreeWatch.mockRejectedValueOnce(capacityError);
+
+    const subscription = await manager.subscribe(
+      {
+        cwd: "/tmp/repo/packages/server",
+        compare: { mode: "uncommitted" },
+      },
+      () => {},
+    );
+
+    expect(subscription.initial).toEqual({
+      cwd: "/tmp/repo/packages/server",
+      files: [],
+      error: {
+        code: "UNKNOWN",
+        message:
+          "Changes view unavailable on this host because file watcher capacity is exhausted.",
+      },
+    });
+    expect(getCheckoutDiffMock).not.toHaveBeenCalled();
   });
 });

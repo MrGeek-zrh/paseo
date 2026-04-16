@@ -8,7 +8,7 @@ describe("panel-store explorer tab resolution", () => {
   const serverId = "server-1";
   const cwd = "/tmp/repo";
 
-  it("defaults to changes for git checkouts", () => {
+  it("defaults to files for git checkouts", () => {
     expect(
       resolveExplorerTabForCheckout({
         serverId,
@@ -16,7 +16,7 @@ describe("panel-store explorer tab resolution", () => {
         isGit: true,
         explorerTabByCheckout: {},
       }),
-    ).toBe("changes");
+    ).toBe("files");
   });
 
   it("defaults to files for non-git checkouts", () => {
@@ -55,7 +55,7 @@ describe("panel-store explorer tab resolution", () => {
           [key]: "terminals" as any,
         },
       }),
-    ).toBe("changes");
+    ).toBe("files");
   });
 
   it("coerces stored changes to files for non-git checkouts", () => {

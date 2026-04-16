@@ -19,6 +19,18 @@ const WORKSPACE_GIT_WATCH_DEBOUNCE_MS = 500;
 const BACKGROUND_GIT_FETCH_INTERVAL_MS = 180_000;
 const WORKING_TREE_WATCH_FALLBACK_REFRESH_MS = 5_000;
 
+export function isWorkingTreeWatcherCapacityError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const code = (error as NodeJS.ErrnoException).code;
+  if (code === "ENOSPC") {
+    return true;
+  }
+  const message = error.message.toLowerCase();
+  return message.includes("file watcher") && message.includes("reached");
+}
+
 export type WorkspaceGitRuntimeSnapshot = {
   cwd: string;
   git: {
@@ -327,43 +339,52 @@ export class WorkspaceGitServiceImpl implements WorkspaceGitService {
       watchPaths.add(gitDir);
     }
 
-    let hasRecursiveRepoCoverage = false;
-    const allowRecursiveRepoWatch = process.platform !== "linux";
-    if (process.platform === "linux") {
-      hasRecursiveRepoCoverage = await this.ensureLinuxRepoTreeWatchers(target, repoWatchPath);
-    }
-    for (const watchPath of watchPaths) {
-      if (process.platform === "linux" && watchPath === repoWatchPath) {
-        continue;
+    try {
+      let hasRecursiveRepoCoverage = false;
+      const allowRecursiveRepoWatch = process.platform !== "linux";
+      if (process.platform === "linux") {
+        hasRecursiveRepoCoverage = await this.ensureLinuxRepoTreeWatchers(target, repoWatchPath);
       }
-      const shouldTryRecursive = watchPath === repoWatchPath && allowRecursiveRepoWatch;
-      const watcherIsRecursive = this.addWorkingTreeWatcher(target, watchPath, shouldTryRecursive);
-      if (watchPath === repoWatchPath && watcherIsRecursive) {
-        hasRecursiveRepoCoverage = true;
-      }
-    }
-
-    const missingRepoCoverage = repoRoot === null || !hasRecursiveRepoCoverage;
-    if (target.watchers.length === 0 || missingRepoCoverage) {
-      target.fallbackRefreshInterval = setInterval(() => {
-        this.scheduleWorkspaceRefresh(cwd);
-        for (const listener of target.listeners) {
-          listener();
+      for (const watchPath of watchPaths) {
+        if (process.platform === "linux" && watchPath === repoWatchPath) {
+          continue;
         }
-      }, WORKING_TREE_WATCH_FALLBACK_REFRESH_MS);
-      this.logger.warn(
-        {
-          cwd,
-          intervalMs: WORKING_TREE_WATCH_FALLBACK_REFRESH_MS,
-          reason:
-            target.watchers.length === 0 ? "no_watchers" : "missing_recursive_repo_root_coverage",
-        },
-        "Working tree watchers unavailable; using timed refresh fallback",
-      );
-    }
+        const shouldTryRecursive = watchPath === repoWatchPath && allowRecursiveRepoWatch;
+        const watcherIsRecursive = this.addWorkingTreeWatcher(
+          target,
+          watchPath,
+          shouldTryRecursive,
+        );
+        if (watchPath === repoWatchPath && watcherIsRecursive) {
+          hasRecursiveRepoCoverage = true;
+        }
+      }
 
-    this.workingTreeWatchTargets.set(cwd, target);
-    return target;
+      const missingRepoCoverage = repoRoot === null || !hasRecursiveRepoCoverage;
+      if (target.watchers.length === 0 || missingRepoCoverage) {
+        target.fallbackRefreshInterval = setInterval(() => {
+          this.scheduleWorkspaceRefresh(cwd);
+          for (const listener of target.listeners) {
+            listener();
+          }
+        }, WORKING_TREE_WATCH_FALLBACK_REFRESH_MS);
+        this.logger.warn(
+          {
+            cwd,
+            intervalMs: WORKING_TREE_WATCH_FALLBACK_REFRESH_MS,
+            reason:
+              target.watchers.length === 0 ? "no_watchers" : "missing_recursive_repo_root_coverage",
+          },
+          "Working tree watchers unavailable; using timed refresh fallback",
+        );
+      }
+
+      this.workingTreeWatchTargets.set(cwd, target);
+      return target;
+    } catch (error) {
+      this.closeWorkingTreeWatchTarget(target);
+      throw error;
+    }
   }
 
   private async resolveCheckoutWatchRoot(cwd: string): Promise<string | null> {
@@ -513,6 +534,10 @@ export class WorkspaceGitServiceImpl implements WorkspaceGitService {
         watcher = createWatcher(false);
       }
     } catch (error) {
+      if (isWorkingTreeWatcherCapacityError(error)) {
+        this.logger.warn({ err: error, watchPath, cwd }, "Working tree watcher capacity exhausted");
+        throw error;
+      }
       if (shouldTryRecursive) {
         try {
           watcher = createWatcher(false);
@@ -521,6 +546,13 @@ export class WorkspaceGitServiceImpl implements WorkspaceGitService {
             "Working tree recursive watch unavailable; using non-recursive fallback",
           );
         } catch (fallbackError) {
+          if (isWorkingTreeWatcherCapacityError(fallbackError)) {
+            this.logger.warn(
+              { err: fallbackError, watchPath, cwd },
+              "Working tree watcher capacity exhausted",
+            );
+            throw fallbackError;
+          }
           this.logger.warn(
             { err: fallbackError, watchPath, cwd },
             "Failed to start working tree watcher",

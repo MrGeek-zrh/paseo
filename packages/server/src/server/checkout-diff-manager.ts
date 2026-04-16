@@ -1,11 +1,16 @@
 import type pino from "pino";
 import type { SubscribeCheckoutDiffRequest, SessionOutboundMessage } from "./messages.js";
-import type { WorkspaceGitService } from "./workspace-git-service.js";
+import {
+  isWorkingTreeWatcherCapacityError,
+  type WorkspaceGitService,
+} from "./workspace-git-service.js";
 import { getCheckoutDiff } from "../utils/checkout-git.js";
 import { expandTilde } from "../utils/path.js";
 import { toCheckoutError } from "./checkout-git-utils.js";
 
 const CHECKOUT_DIFF_WATCH_DEBOUNCE_MS = 150;
+const WORKING_TREE_WATCHER_CAPACITY_MESSAGE =
+  "Changes view unavailable on this host because file watcher capacity is exhausted.";
 
 export type CheckoutDiffCompareInput = SubscribeCheckoutDiffRequest["compare"];
 
@@ -58,7 +63,25 @@ export class CheckoutDiffManager {
   ): Promise<{ initial: CheckoutDiffSnapshotPayload; unsubscribe: () => void }> {
     const cwd = params.cwd;
     const compare = this.normalizeCompare(params.compare);
-    const target = await this.ensureTarget(cwd, compare);
+    let target: CheckoutDiffWatchTarget;
+    try {
+      target = await this.ensureTarget(cwd, compare);
+    } catch (error) {
+      if (isWorkingTreeWatcherCapacityError(error)) {
+        return {
+          initial: {
+            cwd,
+            files: [],
+            error: {
+              code: "UNKNOWN",
+              message: WORKING_TREE_WATCHER_CAPACITY_MESSAGE,
+            },
+          },
+          unsubscribe: () => {},
+        };
+      }
+      throw error;
+    }
     target.listeners.add(listener);
 
     const initial =
