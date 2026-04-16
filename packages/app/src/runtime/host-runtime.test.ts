@@ -641,6 +641,53 @@ describe("HostRuntimeController", () => {
     expect(controller.getSnapshot().agentDirectoryStatus).toBe("ready");
   });
 
+  it("replaces a disconnected active client with the next successful probe", async () => {
+    const host = makeHost({
+      connections: [
+        {
+          id: "direct:lan:6767",
+          type: "directTcp",
+          endpoint: "lan:6767",
+        },
+      ],
+    });
+    const clients: FakeDaemonClient[] = [];
+    const controller = new HostRuntimeController({
+      host,
+      deps: makeDeps(
+        {
+          "direct:lan:6767": 12,
+        },
+        clients,
+      ),
+    });
+
+    await controller.start({ autoProbe: false });
+
+    expect(clients).toHaveLength(1);
+    const staleClient = clients[0]!;
+    expect(controller.getSnapshot().client).toBe(staleClient as unknown as DaemonClient);
+
+    staleClient.setConnectionState({
+      status: "disconnected",
+      reason: "transport closed",
+    });
+    expect(controller.getSnapshot().connectionStatus).toBe("error");
+
+    clearProbeBackoff(controller);
+    await controller.runProbeCycleNow();
+
+    expect(clients).toHaveLength(2);
+    const replacementClient = clients[1]!;
+    const snapshot = controller.getSnapshot();
+    expect(snapshot.client).toBe(replacementClient as unknown as DaemonClient);
+    expect(snapshot.activeConnectionId).toBe("direct:lan:6767");
+    expect(snapshot.connectionStatus).toBe("online");
+    expect(snapshot.lastError).toBeNull();
+    expect(staleClient.closeCalls).toBe(1);
+    expect(replacementClient.closeCalls).toBe(0);
+  });
+
   it("stores directory sync errors as non-blocking after a successful directory load", async () => {
     const host = makeHost();
     const clients: FakeDaemonClient[] = [];
